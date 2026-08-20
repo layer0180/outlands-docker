@@ -1,0 +1,11 @@
+# Laufzeitdaten des Containers (Proton, Wine-Prefix, Spielclient)
+appdata/
+config/
+
+# lokale Compose-Overrides
+docker-compose.override.yml
+.env
+
+# Editor/OS
+*.swp
+.DS_Store

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=UO Outlands (Autostart)
+Comment=Starts the launcher unless AUTOSTART is set to false
+Exec=/usr/local/bin/uo-outlands-autostart
+Icon=input-gaming
+Terminal=false
+NoDisplay=true
+X-XFCE-Autostart-Override=true

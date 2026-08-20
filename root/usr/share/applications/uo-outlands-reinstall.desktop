@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Reinstall UO Outlands
+Comment=Discard the Wine prefix, GE-Proton, and launcher, and set them up again
+Exec=xfce4-terminal --title="UO Outlands - Reinstall" --command="/usr/local/bin/uo-outlands-reinstall" --hold
+Icon=input-gaming
+Terminal=false
+Categories=Game;

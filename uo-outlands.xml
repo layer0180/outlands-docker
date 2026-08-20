@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>uo-outlands</Name>
+  <Repository>uo-outlands:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project>https://github.com/Hezkore/uo-outlands-appimage</Project>
+  <Overview>
+    UO Outlands (Ultima Online freeshard) as a Docker container with a web desktop.
+    On first start, the container downloads GE-Proton and the official Outlands launcher
+    into /config and then launches the game directly. Controlled in the browser via the
+    WebUI (KasmVNC) - no VNC client needed.
+
+    Notes:
+    - The image must be built locally first (see the project README); it is not in any registry.
+    - Several GB are downloaded on first start, which takes a while. Progress is shown in the WebUI.
+    - Without a passed-through GPU, rendering runs in software (llvmpipe). For better
+      performance, pass through /dev/dri (Extra Parameters: --device=/dev/dri:/dev/dri) AND
+      add the host's video/render group GIDs via --group-add (see README) - otherwise the
+      GPU is detected but the game window never appears.
+    - Extra Parameters must include --security-opt seccomp=unconfined, otherwise the
+      32-bit client won't start (Docker blocks modify_ldt by default).
+    - Controlled from the XFCE desktop: the launcher and game run in a normal window,
+      not fullscreen - otherwise the mouse is barely usable in the browser.
+
+    Not affiliated with Ultima Online or UO Outlands.
+  </Overview>
+  <Category>Other: GameServers:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams>--security-opt seccomp=unconfined --shm-size=2g --ulimit nofile=1048576:1048576</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI (HTTP)" Target="3000" Default="3010" Mode="tcp" Description="Web desktop over HTTP" Type="Port" Display="always" Required="true" Mask="false">3010</Config>
+  <Config Name="WebUI (HTTPS)" Target="3001" Default="3011" Mode="tcp" Description="Web desktop over HTTPS (self-signed)" Type="Port" Display="always" Required="false" Mask="false">3011</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/uo-outlands" Mode="rw" Description="Proton, Wine prefix, and game data. Plan for at least 20 GB of free space." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/uo-outlands</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID (Unraid: 99 = nobody)" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID (Unraid: 100 = users)" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="Europe/Berlin" Mode="" Description="Time zone" Type="Variable" Display="always" Required="false" Mask="false">Europe/Berlin</Config>
+  <Config Name="WebUI username" Target="CUSTOM_USER" Default="outlands" Mode="" Description="Username for the web desktop. Empty = no login." Type="Variable" Display="always" Required="false" Mask="false">outlands</Config>
+  <Config Name="WebUI password" Target="PASSWORD" Default="" Mode="" Description="Password for the web desktop. Empty = no login, in which case the port should not be exposed to the internet." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Autostart launcher" Target="AUTOSTART" Default="true" Mode="" Description="true = launcher starts with the container. false = manual start via the UO Outlands desktop icon." Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="Restart after game exit" Target="RESTART_ON_EXIT" Default="false" Mode="" Description="true = the launcher restarts automatically after the game exits." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Game window size" Target="WINE_DESKTOP_SIZE" Default="1280x800" Mode="" Description="Size of the window in which the launcher and game run (virtual Wine desktop). 'auto' sizes it to the browser window." Type="Variable" Display="always" Required="false" Mask="false">1280x800</Config>
+  <Config Name="Window title" Target="TITLE" Default="UO Outlands" Mode="" Description="Title shown in the browser tab" Type="Variable" Display="advanced" Required="false" Mask="false">UO Outlands</Config>
+  <Config Name="GPU (optional)" Target="/dev/dri" Default="/dev/dri" Mode="" Description="Pass through an Intel/AMD GPU. Without it, rendering falls back to software." Type="Device" Display="advanced" Required="false" Mask="false"/>
+</Container>

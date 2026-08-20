@@ -1,0 +1,56 @@
+services:
+  uo-outlands:
+    build:
+      context: .
+      args:
+        # Pin to a tag/commit for reproducible builds
+        UPSTREAM_REF: main
+    image: uo-outlands:latest
+    container_name: uo-outlands
+    ports:
+      - "3010:3000"   # Web desktop (HTTP)
+      - "3011:3001"   # Web desktop (HTTPS)
+    volumes:
+      # On Unraid: /mnt/user/appdata/uo-outlands
+      - ./appdata:/config
+    environment:
+      PUID: "99"          # Unraid: nobody
+      PGID: "100"         # Unraid: users
+      TZ: "Europe/Berlin"
+      TITLE: "UO Outlands"
+      # Web desktop login. Leave empty for no password.
+      CUSTOM_USER: "outlands"
+      PASSWORD: "please-change-me"
+      # Start the launcher automatically when the container starts
+      AUTOSTART: "true"
+      # Restart the launcher automatically after the game exits
+      RESTART_ON_EXIT: "false"
+      # Game window size (virtual Wine desktop), "auto" = screen size
+      WINE_DESKTOP_SIZE: "1280x800"
+    # Wine/Proton need modify_ldt (32-bit client), which Docker's default
+    # seccomp profile blocks, plus far more than the default 64 MB /dev/shm.
+    security_opt:
+      - seccomp:unconfined
+    shm_size: "2gb"
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    # GPU passthrough (Intel/AMD). Without /dev/dri everything renders in
+    # software (llvmpipe), which is usually fine for UO Outlands.
+    devices:
+      - /dev/dri:/dev/dri
+    # Required alongside the device above: on the host, /dev/dri/renderD*
+    # and /dev/dri/card* are owned by root with group "render"/"video" and
+    # mode 660. The container's abc user (remapped to PUID/PGID) is in
+    # neither group, so it can list /dev/dri but not actually open the
+    # device - Mesa then fails to create a GL context and the client never
+    # gets a window, even though the startup log says a GPU was found.
+    # Find the real GIDs on the HOST (not in the container) and use them
+    # here, since group names may map to different GIDs inside the image:
+    #   stat -c '%g' /dev/dri/card0 /dev/dri/renderD128
+    # or: getent group video render
+    group_add:
+      - "44"    # host GID of the "video" group - replace with your value
+      - "992"   # host GID of the "render" group - replace with your value
+    restart: unless-stopped

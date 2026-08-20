@@ -1,0 +1,29 @@
+#!/bin/bash
+# Decides at desktop startup whether the launcher comes up automatically.
+#
+# Note: Openbox sets its own variable named AUTOSTART in its autostart
+# context (the path of the autostart file), which overrides the container
+# variable. The real value is therefore read from the s6 environment.
+
+read_container_env() {
+	local name="$1" file="/run/s6/container_environment/$1"
+	if [[ -r "$file" ]]; then
+		cat "$file"
+	else
+		printf '%s' "${!name-}"
+	fi
+}
+
+value="$(read_container_env UOOUTLANDS_AUTOSTART)"
+[[ -n "$value" ]] || value="$(read_container_env AUTOSTART)"
+value="$(printf '%s' "${value:-true}" | tr '[:upper:]' '[:lower:]')"
+
+case "$value" in
+	false|0|no|off)
+		echo "[uo-outlands] AUTOSTART=$value - the launcher will not start automatically."
+		echo "[uo-outlands] Start by double-clicking the \"UO Outlands\" desktop icon."
+		;;
+	*)
+		exec /usr/local/bin/uo-outlands
+		;;
+esac

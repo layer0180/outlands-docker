@@ -1,0 +1,5 @@
+#!/bin/bash
+# Discards the Wine prefix, GE-Proton, and launcher, and sets everything up
+# again. Character/account data lives server-side; local settings in the
+# prefix are lost in the process.
+exec /usr/local/bin/uo-outlands --reinstall

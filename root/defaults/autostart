@@ -1,0 +1,5 @@
+#!/bin/bash
+# Openbox autostart. Deliberately just one call: this file gets copied by
+# KasmVNC to /config/.config/openbox/ on first start and is not updated
+# afterward. The actual logic therefore lives in the image.
+/usr/local/bin/uo-outlands-autostart &

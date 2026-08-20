@@ -1,0 +1,324 @@
+#!/bin/bash
+# Starts the UO Outlands launcher inside the container.
+#
+# The actual work (loading GE-Proton, creating the Wine prefix, starting
+# the launcher) is done unmodified by AppRun from the upstream repo. This
+# script only sets up the container environment and cleans up around it.
+
+set -uo pipefail
+
+APPRUN="/opt/uo-outlands/AppDir/AppRun"
+
+# Prefer reading container variables from the s6 environment: the Openbox
+# autostart overrides some names (e.g. AUTOSTART) in its own environment.
+read_container_env() {
+	local name="$1" file="/run/s6/container_environment/$1"
+	if [[ -r "$file" ]]; then
+		cat "$file"
+	else
+		printf '%s' "${!name-}"
+	fi
+}
+
+# Data directory lives under /config and thus survives container updates
+UOOUTLANDS_DATA_DIR="$(read_container_env UOOUTLANDS_DATA_DIR)"
+export UOOUTLANDS_DATA_DIR="${UOOUTLANDS_DATA_DIR:-/config/uooutlands}"
+DATA_DIR="$UOOUTLANDS_DATA_DIR"
+
+LOG_FILE="$DATA_DIR/container.log"
+
+mkdir -p "$DATA_DIR" 2>/dev/null || true
+
+log() {
+	printf '[uo-outlands] %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+	printf '[uo-outlands] %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+game_is_running() {
+	pgrep -f 'Outlands\.exe|Patch\.Client' >/dev/null 2>&1
+}
+
+# --- Cleanup after a hard container stop -------------------------------------
+# AppRun creates a lock directory and removes it again in its EXIT trap. If
+# the container gets killed, the lock stays behind and the next start fails
+# with "already running". As long as nothing is actually running, it's safe
+# to remove.
+clear_stale_lock() {
+	local lock="$DATA_DIR/.lock"
+	[[ -d "$lock" ]] || return 0
+	if game_is_running || pgrep -f "$APPRUN" >/dev/null 2>&1; then
+		log "Lock $lock belongs to a running instance, not removing it."
+		return 1
+	fi
+	log "Removing stale lock $lock (from a previous container stop)."
+	rmdir "$lock" 2>/dev/null || rm -rf "$lock" 2>/dev/null || true
+}
+
+# --- Environment ---------------------------------------------------------
+
+# esync/fsync need a lot of file descriptors; go as high as allowed
+if hard_limit="$(ulimit -Hn 2>/dev/null)" && [[ "$hard_limit" != "unlimited" ]]; then
+	ulimit -n "$hard_limit" 2>/dev/null || true
+fi
+
+# Without a passed-through GPU (/dev/dri), pin to software rendering,
+# otherwise Mesa tries in vain to load a DRM driver.
+if [[ -n "${UOOUTLANDS_FORCE_SOFTWARE_GL:-}" ]] || ! ls /dev/dri/renderD* >/dev/null 2>&1; then
+	export LIBGL_ALWAYS_SOFTWARE=1
+	export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
+	log "No GPU found (/dev/dri) - software rendering (llvmpipe) active."
+else
+	log "GPU device(s) found: $(ls /dev/dri 2>/dev/null | tr '\n' ' ')"
+fi
+
+# Audio runs through the base image's PulseAudio server (sound in the
+# browser). The client finds the socket via PULSE_RUNTIME_PATH, which is
+# set in the image.
+export PULSE_RUNTIME_PATH="${PULSE_RUNTIME_PATH:-/defaults}"
+
+# Keep Wine debug output small, the log lives in $DATA_DIR/launch.log anyway
+export WINEDEBUG="${WINEDEBUG:--all}"
+
+# --- Single instance only -----------------------------------------------
+# XFCE restores the saved session on login. Combined with the autostart
+# entry, the launcher would otherwise come up twice - and double-clicking
+# the desktop icon starts it yet again.
+LOCK_FD=""
+acquire_single_instance() {
+	if game_is_running; then
+		log "The game is already running - skipping this start."
+		exit 0
+	fi
+
+	exec {LOCK_FD}>"$DATA_DIR/.wrapper.lock" 2>/dev/null || return 0
+	if ! flock -n "$LOCK_FD"; then
+		log "A launcher instance is already running - skipping this start."
+		exit 0
+	fi
+}
+
+# --- Mouse/input over the remote desktop ---------------------------------
+# Wine grabs the mouse pointer in fullscreen windows. Over VNC, that makes
+# the pointer freeze or jump in the browser. These three registry keys turn
+# that off; they take effect from the next Wine start onward.
+apply_input_tweaks() {
+	local prefix="$DATA_DIR/compatdata/pfx"
+	local marker="$DATA_DIR/.input-tweaks-applied"
+	local proton_bin
+
+	[[ -f "$marker" ]] && return 0
+	[[ -d "$prefix" ]] || return 0
+
+	proton_bin="$(find "$DATA_DIR/proton" -maxdepth 2 -name proton -type f -perm -u+x 2>/dev/null | head -1)"
+	[[ -n "$proton_bin" ]] || return 0
+
+	local reg_file="$DATA_DIR/input-tweaks.reg"
+	cat > "$reg_file" <<'REG'
+REGEDIT4
+
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"GrabPointer"="N"
+"GrabFullscreen"="N"
+"UseTakeFocus"="N"
+REG
+
+	log "Setting Wine input options for the remote desktop (no pointer grab)."
+	if STEAM_COMPAT_DATA_PATH="$DATA_DIR/compatdata" \
+	   STEAM_COMPAT_CLIENT_INSTALL_PATH="$DATA_DIR" \
+	   STEAM_COMPAT_INSTALL_PATH="$DATA_DIR" \
+	   STEAM_COMPAT_LIBRARY_PATHS="$DATA_DIR" \
+	   STEAM_COMPAT_APP_ID=0 \
+	   "$proton_bin" runinprefix regedit /S "$reg_file" >>"$LOG_FILE" 2>&1; then
+		touch "$marker"
+	else
+		log "Registry change failed (not critical, will retry on the next start)."
+	fi
+	rm -f "$reg_file"
+}
+
+# The game client (ClassicUO) starts maximized and borderless out of the
+# box and runs the mouse in its own thread. Both are unpleasant over VNC:
+# no window frame to grab and a pointer that hangs or goes missing. Change
+# this once; later changes made by the user are preserved.
+apply_client_tweaks() {
+	local settings="$DATA_DIR/compatdata/pfx/drive_c/Program Files (x86)/Ultima Online Outlands/ClassicUO/settings.json"
+	local marker="$DATA_DIR/.client-tweaks-applied"
+
+	[[ -f "$marker" ]] && return 0
+	[[ -f "$settings" ]] || return 0
+	pgrep -f 'ClassicUO\.exe' >/dev/null 2>&1 && return 0
+
+	log "Switching the game client's mouse to the main thread."
+	if python3 - "$settings" <<'PYTHON'
+import json, sys
+
+path = sys.argv[1]
+
+with open(path, encoding="utf-8") as handle:
+    settings = json.load(handle)
+
+settings["is_win_maximized"] = False
+settings["run_mouse_in_separate_thread"] = False
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle, indent=2)
+PYTHON
+	then
+		touch "$marker"
+	else
+		log "Could not adjust client settings (not critical)."
+	fi
+}
+
+# Wine gets its own "virtual desktop": a regular window on the XFCE desktop
+# that holds the launcher, game client, and Razor. Without it, the client
+# takes over the whole screen (true borderless fullscreen), which is barely
+# usable over VNC.
+apply_virtual_desktop() {
+	local prefix="$DATA_DIR/compatdata/pfx"
+	local proton_bin size dims
+
+	[[ -d "$prefix" ]] || return 0
+	proton_bin="$(find "$DATA_DIR/proton" -maxdepth 2 -name proton -type f -perm -u+x 2>/dev/null | head -1)"
+	[[ -n "$proton_bin" ]] || return 0
+
+	local reg_file="$DATA_DIR/virtual-desktop.reg"
+	local user_reg="$prefix/user.reg"
+
+	if [[ "${WINE_VIRTUAL_DESKTOP,,}" == "false" ]]; then
+		log "Virtual Wine desktop disabled (WINE_VIRTUAL_DESKTOP=false)."
+		printf 'REGEDIT4\n\n[HKEY_CURRENT_USER\\Software\\Wine\\Explorer]\n"Desktop"=""\n' > "$reg_file"
+	else
+		# Fixed default instead of screen size: at autostart time no browser
+		# is connected yet, so the desktop is only 1024x768 - which would
+		# make for an unnecessarily small game window. WINE_DESKTOP_SIZE=auto
+		# sizes it to the current resolution instead.
+		size="${WINE_DESKTOP_SIZE:-1280x800}"
+		if [[ "${size,,}" == "auto" ]]; then
+			dims="$(DISPLAY="${DISPLAY:-:1}" xdpyinfo 2>/dev/null | awk '/dimensions:/ {print $2}')"
+			if [[ "$dims" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+				local w=$(( ${BASH_REMATCH[1]} - 40 )) h=$(( ${BASH_REMATCH[2]} - 160 ))
+				(( w < 800 )) && w=800
+				(( h < 600 )) && h=600
+				size="${w}x${h}"
+			else
+				size="1280x800"
+			fi
+		fi
+		# If the value is already set in the registry, leave it alone: any
+		# regedit call would itself open the desktop at the old size.
+		if [[ -f "$user_reg" ]] && grep -A3 'Wine\\\\Explorer\\\\Desktops' "$user_reg" 2>/dev/null | grep -q "\"Default\"=\"$size\""; then
+			return 0
+		fi
+
+		log "Virtual Wine desktop: $size"
+		printf 'REGEDIT4\n\n[HKEY_CURRENT_USER\\Software\\Wine\\Explorer]\n"Desktop"="Default"\n\n[HKEY_CURRENT_USER\\Software\\Wine\\Explorer\\Desktops]\n"Default"="%s"\n' "$size" > "$reg_file"
+	fi
+
+	STEAM_COMPAT_DATA_PATH="$DATA_DIR/compatdata" \
+	STEAM_COMPAT_CLIENT_INSTALL_PATH="$DATA_DIR" \
+	STEAM_COMPAT_INSTALL_PATH="$DATA_DIR" \
+	STEAM_COMPAT_LIBRARY_PATHS="$DATA_DIR" \
+	STEAM_COMPAT_APP_ID=0 \
+	"$proton_bin" runinprefix regedit /S "$reg_file" >>"$LOG_FILE" 2>&1 \
+		|| log "Could not set the desktop size (not critical)."
+	rm -f "$reg_file"
+
+	# regedit itself already keeps a desktop open at the old size. As long
+	# as nothing is being played, kill the wineserver so the next start
+	# creates the desktop fresh at the desired size.
+	if ! game_is_running; then
+		local wineserver_bin
+		wineserver_bin="$(find "$DATA_DIR/proton" -maxdepth 4 -name wineserver -type f -perm -u+x 2>/dev/null | head -1)"
+		if [[ -n "$wineserver_bin" ]]; then
+			WINEPREFIX="$prefix" "$wineserver_bin" -k >/dev/null 2>&1 || true
+			sleep 2
+		fi
+	fi
+}
+
+# The game client starts in true fullscreen: no border, no title bar, and
+# the window manager can no longer reach it. That's unusable over VNC. This
+# watcher strips the fullscreen attribute from the window as soon as it
+# appears - the size is left untouched, otherwise the client keeps
+# rendering at the old resolution and clips the content.
+watch_client_window() {
+	local display="${DISPLAY:-:1}"
+	while :; do
+		if DISPLAY="$display" wmctrl -l 2>/dev/null | grep -q 'Outlands - '; then
+			DISPLAY="$display" wmctrl -r 'Outlands - ' -b remove,fullscreen 2>/dev/null || true
+		fi
+		sleep 5
+	done
+}
+
+# --- Start -----------------------------------------------------------------
+
+start_launcher() {
+	clear_stale_lock || return 1
+	log "Starting launcher ($APPRUN), data directory: $DATA_DIR"
+	"$APPRUN" "$@" 2>&1 | tee -a "$LOG_FILE"
+	local rc=${PIPESTATUS[0]}
+	if (( rc != 0 )); then
+		log "Launcher exited with error code $rc - details in $DATA_DIR/launch.log"
+	fi
+	return "$rc"
+}
+
+# AppRun returns as soon as the game is running (the Wine process keeps
+# running). Wait here afterward so it's possible to tell when the session
+# has actually ended.
+wait_for_game_exit() {
+	local waited=0
+	while (( waited < 60 )); do
+		game_is_running && break
+		sleep 1
+		(( waited++ ))
+	done
+	game_is_running || return 0
+	log "Game is running."
+	while game_is_running; do
+		sleep 5
+	done
+	log "Game has exited."
+}
+
+main() {
+	acquire_single_instance
+	apply_input_tweaks
+	apply_client_tweaks
+	apply_virtual_desktop
+
+	local watcher_pid=""
+	if [[ "${WINDOWED_MODE,,}" != "false" ]]; then
+		watch_client_window &
+		watcher_pid=$!
+	else
+		log "WINDOWED_MODE=false - the client stays in fullscreen."
+	fi
+
+	start_launcher "$@" || { [[ -n "$watcher_pid" ]] && kill "$watcher_pid" 2>/dev/null; exit 1; }
+	wait_for_game_exit
+	[[ -n "$watcher_pid" ]] && kill "$watcher_pid" 2>/dev/null
+	# On the very first run, the prefix and client config didn't exist yet
+	apply_input_tweaks
+	apply_client_tweaks
+	apply_virtual_desktop
+
+	if [[ "${RESTART_ON_EXIT,,}" == "true" ]]; then
+		log "RESTART_ON_EXIT=true - restarting in 5 seconds."
+		sleep 5
+		exec "$0" "$@"
+	fi
+
+	log "Done. Restart by double-clicking the \"UO Outlands\" desktop icon."
+}
+
+RESTART_ON_EXIT="$(read_container_env RESTART_ON_EXIT)"
+RESTART_ON_EXIT="${RESTART_ON_EXIT:-false}"
+WINDOWED_MODE="$(read_container_env WINDOWED_MODE)"
+WINDOWED_MODE="${WINDOWED_MODE:-true}"
+WINE_VIRTUAL_DESKTOP="$(read_container_env WINE_VIRTUAL_DESKTOP)"
+WINE_VIRTUAL_DESKTOP="${WINE_VIRTUAL_DESKTOP:-true}"
+WINE_DESKTOP_SIZE="$(read_container_env WINE_DESKTOP_SIZE)"
+main "$@"

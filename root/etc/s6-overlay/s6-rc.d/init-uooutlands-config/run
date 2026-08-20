@@ -1,0 +1,74 @@
+#!/usr/bin/with-contenv bash
+
+DATA_DIR="${UOOUTLANDS_DATA_DIR:-/config/uooutlands}"
+
+mkdir -p "$DATA_DIR"
+lsiown -R abc:abc "$DATA_DIR"
+
+# AppRun removes its lock in its EXIT trap. After a hard container stop it
+# stays behind and blocks the next start, so clean it up here.
+if [[ -d "$DATA_DIR/.lock" ]]; then
+  echo "**** removing stale lock $DATA_DIR/.lock ****"
+  rmdir "$DATA_DIR/.lock" 2>/dev/null || rm -rf "$DATA_DIR/.lock"
+fi
+
+# Basic XFCE settings: no session restore (otherwise the launcher would
+# start twice next time) and no compositing (costs CPU time over VNC for
+# no benefit, since GL runs in software here anyway).
+XFCONF_DIR=/config/.config/xfce4/xfconf/xfce-perchannel-xml
+mkdir -p "$XFCONF_DIR"
+
+if [[ ! -f "$XFCONF_DIR/xfce4-session.xml" ]]; then
+  cat > "$XFCONF_DIR/xfce4-session.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-session" version="1.0">
+  <property name="general" type="empty">
+    <property name="SaveOnExit" type="bool" value="false"/>
+    <property name="AutoSave" type="bool" value="false"/>
+    <property name="PromptOnLogout" type="bool" value="false"/>
+  </property>
+</channel>
+XML
+fi
+
+if [[ ! -f "$XFCONF_DIR/xfwm4.xml" ]]; then
+  cat > "$XFCONF_DIR/xfwm4.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="use_compositing" type="bool" value="false"/>
+  </property>
+</channel>
+XML
+fi
+
+# Existing configuration: disable compositing once. Anyone who wants it
+# back can turn it on again in XFCE settings - the marker file ensures this
+# doesn't get overwritten on every start.
+COMPOSITING_MARKER=/config/.uooutlands-compositing-off
+if [[ ! -f "$COMPOSITING_MARKER" ]]; then
+  if [[ -f "$XFCONF_DIR/xfwm4.xml" ]]; then
+    sed -i 's|\(name="use_compositing"[^/]*value=\)"true"|\1"false"|' "$XFCONF_DIR/xfwm4.xml"
+  fi
+  touch "$COMPOSITING_MARKER"
+  lsiown abc:abc "$COMPOSITING_MARKER"
+fi
+
+# An already-saved session would start the launcher again
+rm -rf /config/.cache/sessions/* 2>/dev/null || true
+
+lsiown -R abc:abc /config/.config/xfce4
+
+# Create a desktop shortcut so the game can also be started by double-click
+# without autostart
+if [[ ! -f /config/Desktop/uo-outlands.desktop ]]; then
+  mkdir -p /config/Desktop
+  cp /usr/share/applications/uo-outlands.desktop /config/Desktop/
+  chmod +x /config/Desktop/uo-outlands.desktop
+  lsiown -R abc:abc /config/Desktop
+fi
+
+echo "**** UO Outlands data directory: $DATA_DIR ****"
+if [[ -f /opt/uo-outlands.rev ]]; then
+  echo "**** Launcher script (upstream commit): $(cat /opt/uo-outlands.rev) ****"
+fi
