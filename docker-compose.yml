@@ -53,4 +53,10 @@ services:
     group_add:
       - "44"    # host GID of the "video" group - replace with your value
       - "992"   # host GID of the "render" group - replace with your value
+    networks:
+      - uo-outlands
     restart: unless-stopped
+
+networks:
+  uo-outlands:
+    driver: bridge
