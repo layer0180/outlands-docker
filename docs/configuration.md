@@ -56,6 +56,22 @@ stat -c '%g' /dev/dri/card0 /dev/dri/renderD128
 
 Force software rendering regardless with `UOOUTLANDS_FORCE_SOFTWARE_GL=1`.
 
+### Vulkan (anv) driver crash / GPU device lost
+
+Symptom: `launch.log` shows a batch/BO dump right after `fsync: up and running` (e.g.
+`Batch offset=... len=0x0`, entries like `name=trtt-page-table`), and the game window
+never appears - even with `group_add` and devices correctly set up. This is a crash in
+Mesa's `anv` (Intel Vulkan) driver, hit via DXVK (which translates the game's D3D9 calls
+to Vulkan); seen e.g. on Alder Lake-N iGPUs with recent Mesa versions. Work around it by
+forcing Proton to use `wined3d` (OpenGL, via the `iris` driver) instead of DXVK:
+
+```yaml
+environment:
+  PROTON_USE_WINED3D: "1"
+```
+
+Still GPU-accelerated, just via OpenGL instead of Vulkan.
+
 ## Building the image yourself
 
 ```bash

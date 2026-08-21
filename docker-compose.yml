@@ -27,6 +27,12 @@ services:
       RESTART_ON_EXIT: "false"
       # Game window size (virtual Wine desktop), "auto" = screen size
       WINE_DESKTOP_SIZE: "1280x800"
+      # Workaround for a Mesa/anv (Intel Vulkan) driver crash on some iGPUs
+      # (TR-TT/sparse-residency batch abort, seen e.g. on Alder Lake-N) that
+      # breaks DXVK. Forces Proton to use wined3d (OpenGL, via the "iris"
+      # driver) instead of DXVK (Vulkan, via "anv") - still GPU-accelerated.
+      # Remove this line once the underlying Mesa bug is fixed upstream.
+      PROTON_USE_WINED3D: "1"
     # Wine/Proton need modify_ldt (32-bit client), which Docker's default
     # seccomp profile blocks, plus far more than the default 64 MB /dev/shm.
     security_opt:
