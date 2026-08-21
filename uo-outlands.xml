@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>uo-outlands</Name>
-  <Repository>uo-outlands:latest</Repository>
-  <Registry/>
+  <Repository>ghcr.io/layer0180/outlands-docker:latest</Repository>
+  <Registry>https://ghcr.io/layer0180/outlands-docker</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
@@ -16,7 +16,7 @@
     WebUI (KasmVNC) - no VNC client needed.
 
     Notes:
-    - The image must be built locally first (see the project README); it is not in any registry.
+    - The image is pulled automatically from GHCR (ghcr.io/layer0180/outlands-docker).
     - Several GB are downloaded on first start, which takes a while. Progress is shown in the WebUI.
     - Without a passed-through GPU, rendering runs in software (llvmpipe). For better
       performance, pass through /dev/dri (Extra Parameters: --device=/dev/dri:/dev/dri) AND

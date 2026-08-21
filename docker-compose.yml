@@ -1,11 +1,11 @@
 services:
   uo-outlands:
-    build:
-      context: .
-      args:
-        # Pin to a tag/commit for reproducible builds
-        UPSTREAM_REF: main
-    image: uo-outlands:latest
+    image: ghcr.io/layer0180/outlands-docker:latest
+    # Build locally instead of pulling from GHCR:
+    # build:
+    #   context: .
+    #   args:
+    #     UPSTREAM_REF: main
     container_name: uo-outlands
     ports:
       - "3010:3000"   # Web desktop (HTTP)
@@ -36,10 +36,15 @@ services:
       nofile:
         soft: 1048576
         hard: 1048576
-    # GPU passthrough (Intel/AMD). Without /dev/dri everything renders in
+    # GPU passthrough (Intel/AMD). Without it, everything renders in
     # software (llvmpipe), which is usually fine for UO Outlands.
+    # Pass only the specific card/render node, not the whole /dev/dri
+    # directory - some hosts expose a second, unrelated DRM device (e.g. a
+    # virtual "vkms" card) alongside the real GPU, and Mesa may pick the
+    # wrong one if both are visible in the container.
     devices:
-      - /dev/dri:/dev/dri
+      - /dev/dri/card0:/dev/dri/card0
+      - /dev/dri/renderD128:/dev/dri/renderD128
     # Required alongside the device above: on the host, /dev/dri/renderD*
     # and /dev/dri/card* are owned by root with group "render"/"video" and
     # mode 660. The container's abc user (remapped to PUID/PGID) is in
@@ -51,8 +56,7 @@ services:
     #   stat -c '%g' /dev/dri/card0 /dev/dri/renderD128
     # or: getent group video render
     group_add:
-      - "44"    # host GID of the "video" group - replace with your value
-      - "992"   # host GID of the "render" group - replace with your value
+      - "18"    # host GID of the "video"/"render" group (both are GID 18 on this host)
     networks:
       - uo-outlands
     restart: unless-stopped
