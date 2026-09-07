@@ -36,9 +36,10 @@ This repository has no license set yet. The startup logic executed inside the im
 from [Hezkore/uo-outlands-appimage](https://github.com/Hezkore/uo-outlands-appimage) under
 its own license.
 
-## Legal
+## Licence
 
-AGPL-3.0. Because this is served over a network, § 13 also requires anyone running a modified version to offer its source to the people using it.
+[AGPL-3.0](LICENSE). Because this is served over a network, § 13 also requires
+anyone running a *modified* version to offer its source to the people using it.
 
 ## Contributors
 
