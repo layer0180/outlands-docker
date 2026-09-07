@@ -38,8 +38,7 @@ its own license.
 
 ## Legal
 
-Not affiliated with Ultima Online or UO Outlands. The game client is downloaded from the
-official servers at runtime and is not distributed with the image.
+AGPL-3.0. Because this is served over a network, § 13 also requires anyone running a modified version to offer its source to the people using it.
 
 ## Contributors
 
