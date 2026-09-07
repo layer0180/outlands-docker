@@ -1,6 +1,6 @@
 # uo_outlands_docker
 
-**UO Outlands as a Docker container for Unraid.**
+**UO Outlands as a Docker container**
 
 Runs the Windows client of [UO Outlands](https://uooutlands.com) as a Docker container,
 controlled entirely in the browser - no VNC client needed. All mutable data lives under
