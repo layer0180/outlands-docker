@@ -15,13 +15,9 @@ Pull and run the prebuilt image from GHCR:
 ```bash
 docker compose up -d
 ```
-
-Or via Unraid: copy `uo-outlands.xml` to `/boot/config/plugins/dockerMan/templates-user/`,
-then Docker → *Add Container* → template `uo-outlands`.
-
 Then open `http://<host-ip>:3010/`.
 
-Edit `docker-compose.yml` (or the Unraid template) to set your `PASSWORD`, timezone and
+Edit `docker-compose.yml` to set your `PASSWORD`, timezone and
 `/config` path before starting.
 
 ### Notes
